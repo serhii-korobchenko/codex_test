@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YouTube Subtitles Word Analyzer</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>YouTube subtitles analyzer</h1>
+      <p>
+        Встав посилання на YouTube відео — застосунок знайде англійські субтитри і покаже
+        найчастіші слова.
+      </p>
+
+      <form id="analyze-form" class="card">
+        <label for="url">YouTube URL або video ID</label>
+        <div class="form-row">
+          <input id="url" name="url" type="text" placeholder="https://www.youtube.com/watch?v=..." required />
+          <button type="submit">Аналізувати</button>
+        </div>
+      </form>
+
+      <section id="status" class="status"></section>
+
+      <section id="results" class="card hidden">
+        <h2>Результат</h2>
+        <div class="stats">
+          <div><strong>Video ID:</strong> <span id="video-id"></span></div>
+          <div><strong>Слів всього:</strong> <span id="total-words"></span></div>
+          <div><strong>Унікальних слів:</strong> <span id="unique-words"></span></div>
+        </div>
+        <h3>Топ-слова</h3>
+        <ol id="top-words"></ol>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
