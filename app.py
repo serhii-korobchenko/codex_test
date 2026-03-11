@@ -21,6 +21,8 @@ STOPWORDS = {
     "you", "your", "yours",
 }
 
+ENGLISH_CODES = ["en", "en-US", "en-GB"]
+
 
 def extract_video_id(url: str) -> str | None:
     parsed = urlparse(url.strip())
@@ -46,6 +48,26 @@ def tokenize(text: str) -> list[str]:
     return [w for w in words if len(w) > 2 and w not in STOPWORDS]
 
 
+def pick_english_transcript(transcript_list):
+    """
+    Пріоритет:
+    1) ручні англійські субтитри,
+    2) автозгенеровані англійські субтитри,
+    3) fallback на будь-які англійські субтитри.
+    """
+    try:
+        return transcript_list.find_manually_created_transcript(ENGLISH_CODES)
+    except NoTranscriptFound:
+        pass
+
+    try:
+        return transcript_list.find_generated_transcript(ENGLISH_CODES)
+    except NoTranscriptFound:
+        pass
+
+    return transcript_list.find_transcript(ENGLISH_CODES)
+
+
 @app.get("/")
 def index():
     return render_template("index.html")
@@ -62,10 +84,10 @@ def analyze_subtitles():
 
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        transcript = transcript_list.find_transcript(["en", "en-US", "en-GB"])
+        transcript = pick_english_transcript(transcript_list)
         segments = transcript.fetch()
     except NoTranscriptFound:
-        return jsonify({"error": "Англійські субтитри не знайдені для цього відео."}), 404
+        return jsonify({"error": "Англійські субтитри (включно з auto-generated) не знайдені для цього відео."}), 404
     except (TranscriptsDisabled, VideoUnavailable):
         return jsonify({"error": "Субтитри недоступні для цього відео."}), 404
     except Exception as exc:
@@ -86,6 +108,8 @@ def analyze_subtitles():
     return jsonify(
         {
             "videoId": video_id,
+            "subtitleLanguage": transcript.language_code,
+            "subtitleSource": "auto-generated" if transcript.is_generated else "manual",
             "totalWords": len(tokens),
             "uniqueWords": len(frequencies),
             "topWords": top_words,

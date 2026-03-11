@@ -6,6 +6,8 @@ const topWordsList = document.getElementById('top-words');
 const videoIdEl = document.getElementById('video-id');
 const totalWordsEl = document.getElementById('total-words');
 const uniqueWordsEl = document.getElementById('unique-words');
+const subtitleLanguageEl = document.getElementById('subtitle-language');
+const subtitleSourceEl = document.getElementById('subtitle-source');
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -34,6 +36,8 @@ form.addEventListener('submit', async (event) => {
     videoIdEl.textContent = data.videoId;
     totalWordsEl.textContent = data.totalWords;
     uniqueWordsEl.textContent = data.uniqueWords;
+    subtitleLanguageEl.textContent = data.subtitleLanguage || '-';
+    subtitleSourceEl.textContent = data.subtitleSource || '-';
 
     topWordsList.innerHTML = '';
     data.topWords.forEach((item) => {
