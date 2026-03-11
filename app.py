@@ -50,17 +50,44 @@ def tokenize(text: str) -> list[str]:
 
 
 def pick_english_transcript(transcript_list):
+    """
+    Повертає кортеж: (transcript, source_label)
+
+    Пріоритет:
+    1) ручні англійські,
+    2) auto-generated англійські,
+    3) будь-які англійські,
+    4) auto-generated будь-якою мовою + автопереклад в англійську,
+    5) будь-які субтитри + автопереклад в англійську.
+    """
     try:
-        return transcript_list.find_manually_created_transcript(ENGLISH_CODES)
+        return transcript_list.find_manually_created_transcript(ENGLISH_CODES), "manual"
     except NoTranscriptFound:
         pass
 
     try:
-        return transcript_list.find_generated_transcript(ENGLISH_CODES)
+        return transcript_list.find_generated_transcript(ENGLISH_CODES), "auto-generated"
     except NoTranscriptFound:
         pass
 
-    return transcript_list.find_transcript(ENGLISH_CODES)
+    try:
+        transcript = transcript_list.find_transcript(ENGLISH_CODES)
+        source = "auto-generated" if transcript.is_generated else "manual"
+        return transcript, source
+    except NoTranscriptFound:
+        pass
+
+    for transcript in transcript_list:
+        if transcript.is_generated and transcript.is_translatable:
+            return transcript.translate("en"), "auto-generated (translated to en)"
+
+    for transcript in transcript_list:
+        if transcript.is_translatable:
+            translated = transcript.translate("en")
+            source = "auto-generated (translated to en)" if transcript.is_generated else "manual (translated to en)"
+            return translated, source
+
+    raise NoTranscriptFound(video_id="", requested_language_codes=ENGLISH_CODES, transcript_data=[])
 
 
 def is_rate_limited_error(exc: Exception) -> bool:
@@ -77,8 +104,8 @@ def fetch_transcript_with_retry(video_id: str, retries: int = 1, delay_s: float 
     for attempt in range(retries + 1):
         try:
             transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-            transcript = pick_english_transcript(transcript_list)
-            return transcript, transcript.fetch()
+            transcript, source_label = pick_english_transcript(transcript_list)
+            return transcript, source_label, transcript.fetch()
         except Exception as exc:
             if attempt < retries and is_rate_limited_error(exc):
                 time.sleep(delay_s)
@@ -101,9 +128,9 @@ def analyze_subtitles():
         return jsonify({"error": "Невірне YouTube посилання або ID відео."}), 400
 
     try:
-        transcript, segments = fetch_transcript_with_retry(video_id)
+        transcript, source_label, segments = fetch_transcript_with_retry(video_id)
     except NoTranscriptFound:
-        return jsonify({"error": "Англійські субтитри (включно з auto-generated) не знайдені для цього відео."}), 404
+        return jsonify({"error": "Не знайдено придатні субтитри (включно з auto-generated/перекладом в англійську) для цього відео."}), 404
     except (TranscriptsDisabled, VideoUnavailable):
         return jsonify({"error": "Субтитри недоступні для цього відео."}), 404
     except Exception as exc:
@@ -134,7 +161,7 @@ def analyze_subtitles():
         {
             "videoId": video_id,
             "subtitleLanguage": transcript.language_code,
-            "subtitleSource": "auto-generated" if transcript.is_generated else "manual",
+            "subtitleSource": source_label,
             "totalWords": len(tokens),
             "uniqueWords": len(frequencies),
             "topWords": top_words,
