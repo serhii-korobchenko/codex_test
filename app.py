@@ -1,4 +1,5 @@
 import re
+import time
 from collections import Counter
 from urllib.parse import parse_qs, urlparse
 
@@ -49,12 +50,6 @@ def tokenize(text: str) -> list[str]:
 
 
 def pick_english_transcript(transcript_list):
-    """
-    Пріоритет:
-    1) ручні англійські субтитри,
-    2) автозгенеровані англійські субтитри,
-    3) fallback на будь-які англійські субтитри.
-    """
     try:
         return transcript_list.find_manually_created_transcript(ENGLISH_CODES)
     except NoTranscriptFound:
@@ -66,6 +61,29 @@ def pick_english_transcript(transcript_list):
         pass
 
     return transcript_list.find_transcript(ENGLISH_CODES)
+
+
+def is_rate_limited_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return (
+        "too many requests" in msg
+        or "429" in msg
+        or "google.com/sorry" in msg
+        or "request to youtube failed" in msg
+    )
+
+
+def fetch_transcript_with_retry(video_id: str, retries: int = 1, delay_s: float = 1.5):
+    for attempt in range(retries + 1):
+        try:
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            transcript = pick_english_transcript(transcript_list)
+            return transcript, transcript.fetch()
+        except Exception as exc:
+            if attempt < retries and is_rate_limited_error(exc):
+                time.sleep(delay_s)
+                continue
+            raise
 
 
 @app.get("/")
@@ -83,15 +101,22 @@ def analyze_subtitles():
         return jsonify({"error": "Невірне YouTube посилання або ID відео."}), 400
 
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        transcript = pick_english_transcript(transcript_list)
-        segments = transcript.fetch()
+        transcript, segments = fetch_transcript_with_retry(video_id)
     except NoTranscriptFound:
         return jsonify({"error": "Англійські субтитри (включно з auto-generated) не знайдені для цього відео."}), 404
     except (TranscriptsDisabled, VideoUnavailable):
         return jsonify({"error": "Субтитри недоступні для цього відео."}), 404
     except Exception as exc:
-        return jsonify({"error": f"Помилка отримання субтитрів: {str(exc)}"}), 500
+        if is_rate_limited_error(exc):
+            return jsonify(
+                {
+                    "error": (
+                        "YouTube тимчасово обмежив запити (429 Too Many Requests). "
+                        "Спробуй ще раз через 1-2 хвилини або пізніше."
+                    )
+                }
+            ), 429
+        return jsonify({"error": "Не вдалося отримати субтитри. Спробуй інше відео або повтори спробу пізніше."}), 500
 
     full_text = " ".join(segment.text for segment in segments)
     tokens = tokenize(full_text)

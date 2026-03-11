@@ -29,3 +29,8 @@ web: gunicorn app:app
 - Повертає топ-25 слів з частотами
 
 - Показує, чи субтитри manual чи auto-generated
+
+## Обробка обмежень YouTube
+
+- Якщо YouTube повертає `429 Too Many Requests`, API повертає зрозуміле повідомлення без технічного stack trace та статус `429`.
+- Додано короткий retry при тимчасовому rate-limit.
