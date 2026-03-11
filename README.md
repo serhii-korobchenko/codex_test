@@ -23,7 +23,7 @@ web: gunicorn app:app
 
 ## Що робить аналіз
 
-- Дістає англійські субтитри (`en`, `en-US`, `en-GB`) з підтримкою auto-generated від YouTube
+- Дістає англійські субтитри (`en`, `en-US`, `en-GB`) з підтримкою auto-generated від YouTube та fallback на автопереклад в англійську
 - Токенізує текст
 - Відкидає короткі/стоп-слова
 - Повертає топ-25 слів з частотами
@@ -34,3 +34,5 @@ web: gunicorn app:app
 
 - Якщо YouTube повертає `429 Too Many Requests`, API повертає зрозуміле повідомлення без технічного stack trace та статус `429`.
 - Додано короткий retry при тимчасовому rate-limit.
+
+- Для різних причин збою (rate-limit, video unavailable, transcripts disabled, no transcript found) API повертає точніші повідомлення замість одного загального.
