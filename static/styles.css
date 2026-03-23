@@ -1,0 +1,95 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, Arial, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+}
+
+h1 {
+  margin-bottom: 0.25rem;
+}
+
+.card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 1rem;
+  margin-top: 1rem;
+}
+
+.form-row {
+  margin-top: 0.5rem;
+  display: flex;
+  gap: 0.5rem;
+}
+
+input,
+select {
+  flex: 1;
+  border-radius: 8px;
+  border: 1px solid #475569;
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 0.75rem;
+}
+
+button {
+  border: none;
+  border-radius: 8px;
+  background: #22c55e;
+  color: #052e16;
+  font-weight: 700;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.topic-videos {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.select-video-btn {
+  width: 100%;
+  text-align: left;
+  background: #334155;
+  color: #e2e8f0;
+}
+
+.status {
+  min-height: 1.5rem;
+  margin-top: 0.75rem;
+}
+
+.error {
+  color: #fda4af;
+}
+
+.success {
+  color: #86efac;
+}
+
+.hidden {
+  display: none;
+}
+
+#top-words li {
+  margin-bottom: 0.35rem;
+}
