@@ -38,7 +38,7 @@ async function loadTopicVideos() {
 
   topicVideos.innerHTML = '';
   statusBox.className = 'status';
-  statusBox.textContent = 'Перевіряю відео з доступною транскрипцією...';
+  statusBox.textContent = 'Завантажую операторський перелік відео...';
 
   try {
     const response = await fetch(`/topic-videos?topic=${encodeURIComponent(topic)}`);
@@ -49,7 +49,7 @@ async function loadTopicVideos() {
     }
 
     if (!data.videos.length) {
-      topicVideos.innerHTML = '<li>Наразі немає підтверджених відео для цієї теми.</li>';
+      topicVideos.innerHTML = '<li>Наразі оператор не додав відео для цієї теми.</li>';
       statusBox.className = 'status error';
       statusBox.textContent = 'Підходящі відео не знайдені.';
       return;

@@ -34,30 +34,27 @@ ENGLISH_CODES = ["en", "en-US", "en-GB"]
 # Застосунок фільтрує цей список і показує тільки відео, де транскрипція реально доступна.
 TOPIC_VIDEO_CATALOG = {
     "technology": [
-        {"id": "aircAruvnKk", "title": "How neural networks work"},
-        {"id": "rfscVS0vtbw", "title": "Python full course"},
-        {"id": "8mAITcNt710", "title": "Git and GitHub crash course"},
+        {"id": "aircAruvnKk", "title": "How neural networks work", "subtitleLanguage": "en", "subtitleSource": "manual"},
+        {"id": "rfscVS0vtbw", "title": "Python full course", "subtitleLanguage": "en", "subtitleSource": "auto-generated"},
+        {"id": "8mAITcNt710", "title": "Git and GitHub crash course", "subtitleLanguage": "en", "subtitleSource": "auto-generated"},
     ],
     "science": [
-        {"id": "5MgBikgcWnY", "title": "The basics of climate science"},
-        {"id": "k6U-i4gXkLM", "title": "CRISPR explained"},
-        {"id": "WXuK6gekU1Y", "title": "How gravity works"},
+        {"id": "5MgBikgcWnY", "title": "The basics of climate science", "subtitleLanguage": "en", "subtitleSource": "manual"},
+        {"id": "k6U-i4gXkLM", "title": "CRISPR explained", "subtitleLanguage": "en", "subtitleSource": "auto-generated"},
+        {"id": "WXuK6gekU1Y", "title": "How gravity works", "subtitleLanguage": "en", "subtitleSource": "auto-generated"},
     ],
     "business": [
-        {"id": "x2qRDMHbXaM", "title": "Business model canvas"},
-        {"id": "PHe0bXAIuk0", "title": "Startup funding basics"},
-        {"id": "fU-Pa3R8wT0", "title": "Marketing strategy fundamentals"},
+        {"id": "x2qRDMHbXaM", "title": "Business model canvas", "subtitleLanguage": "en", "subtitleSource": "manual"},
+        {"id": "PHe0bXAIuk0", "title": "Startup funding basics", "subtitleLanguage": "en", "subtitleSource": "auto-generated"},
+        {"id": "fU-Pa3R8wT0", "title": "Marketing strategy fundamentals", "subtitleLanguage": "en", "subtitleSource": "auto-generated"},
     ],
     "education": [
-        {"id": "PkZNo7MFNFg", "title": "Learn JavaScript"},
-        {"id": "Ke90Tje7VS0", "title": "React for beginners"},
-        {"id": "Z1Yd7upQsXY", "title": "Data structures overview"},
+        {"id": "PkZNo7MFNFg", "title": "Learn JavaScript", "subtitleLanguage": "en", "subtitleSource": "manual"},
+        {"id": "Ke90Tje7VS0", "title": "React for beginners", "subtitleLanguage": "en", "subtitleSource": "auto-generated"},
+        {"id": "Z1Yd7upQsXY", "title": "Data structures overview", "subtitleLanguage": "en", "subtitleSource": "auto-generated"},
     ],
 }
 
-# topic -> {expires_at, items}
-TRANSCRIPT_AVAILABILITY_CACHE: dict[str, dict] = {}
-CACHE_TTL_SECONDS = 30 * 60
 
 
 def extract_video_id(url: str) -> str | None:
@@ -238,36 +235,18 @@ def build_transcript_error(exc: Exception) -> tuple[str, int]:
     return ("Не вдалося отримати субтитри. Спробуй інше відео або повтори спробу пізніше.", 500)
 
 
-def get_available_videos_for_topic(topic: str, force_refresh: bool = False) -> list[dict]:
-    now = time.time()
-    cached = TRANSCRIPT_AVAILABILITY_CACHE.get(topic)
-    if cached and cached["expires_at"] > now and not force_refresh:
-        return cached["items"]
-
+def get_operator_curated_videos_for_topic(topic: str) -> list[dict]:
     candidates = TOPIC_VIDEO_CATALOG.get(topic, [])
-    available = []
-
-    for item in candidates:
-        video_id = item["id"]
-        try:
-            transcript, source_label, _ = fetch_transcript_with_retry(video_id, retries=0)
-            available.append(
-                {
-                    "videoId": video_id,
-                    "title": item["title"],
-                    "url": f"https://www.youtube.com/watch?v={video_id}",
-                    "subtitleLanguage": transcript.language_code,
-                    "subtitleSource": source_label,
-                }
-            )
-        except Exception:
-            continue
-
-    TRANSCRIPT_AVAILABILITY_CACHE[topic] = {
-        "expires_at": now + CACHE_TTL_SECONDS,
-        "items": available,
-    }
-    return available
+    return [
+        {
+            "videoId": item["id"],
+            "title": item["title"],
+            "url": f"https://www.youtube.com/watch?v={item['id']}",
+            "subtitleLanguage": item.get("subtitleLanguage", "en"),
+            "subtitleSource": item.get("subtitleSource", "operator-verified"),
+        }
+        for item in candidates
+    ]
 
 
 @app.get("/")
@@ -290,13 +269,11 @@ def list_topics():
 @app.get("/topic-videos")
 def list_videos_by_topic():
     topic = request.args.get("topic", "").strip().lower()
-    refresh = request.args.get("refresh", "0") == "1"
-
     if topic not in TOPIC_VIDEO_CATALOG:
         return jsonify({"error": "Невідома тематика."}), 400
 
-    videos = get_available_videos_for_topic(topic, force_refresh=refresh)
-    return jsonify({"topic": topic, "videos": videos})
+    videos = get_operator_curated_videos_for_topic(topic)
+    return jsonify({"topic": topic, "videos": videos, "source": "operator-curated"})
 
 
 @app.post("/analyze")
