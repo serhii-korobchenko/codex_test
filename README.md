@@ -27,12 +27,16 @@ web: gunicorn app:app
 - Токенізує текст
 - Відкидає короткі/стоп-слова
 - Повертає топ-25 слів з частотами
-
 - Показує, чи субтитри manual чи auto-generated
+
+## Підбір відео за тематикою (операторський каталог)
+
+- Оператор задає тематичний каталог `TOPIC_VIDEO_CATALOG` в `app.py`.
+- Користувач обирає тематику на сторінці.
+- Застосунок повертає лише ті відео, для яких транскрипція перевірена як доступна на момент запиту.
+- Результати перевірки кешуються на 30 хвилин (`CACHE_TTL_SECONDS`).
 
 ## Обробка обмежень YouTube
 
 - Якщо YouTube повертає `429 Too Many Requests`, API повертає зрозуміле повідомлення без технічного stack trace та статус `429`.
-- Додано короткий retry при тимчасовому rate-limit.
-
-- Для різних причин збою (rate-limit, video unavailable, transcripts disabled, no transcript found) API повертає точніші повідомлення замість одного загального.
+- Якщо `youtube-transcript-api` повертає `TranscriptsDisabled/NoTranscriptFound`, застосунок пробує fallback через YouTube watch page caption tracks.

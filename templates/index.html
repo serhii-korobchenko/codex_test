@@ -10,9 +10,18 @@
     <main class="container">
       <h1>YouTube subtitles analyzer</h1>
       <p>
-        Встав посилання на YouTube відео — застосунок знайде англійські (включно з auto-generated) субтитри і покаже
-        найчастіші слова.
+        Встав посилання на YouTube відео або обери тематику — застосунок покаже список відео,
+        де транскрипція вже перевірена як доступна.
       </p>
+
+      <section class="card">
+        <h2>Підібрати відео за тематикою</h2>
+        <div class="form-row">
+          <select id="topic-select"></select>
+          <button id="load-topic-videos" type="button">Завантажити перелік</button>
+        </div>
+        <ul id="topic-videos" class="topic-videos"></ul>
+      </section>
 
       <form id="analyze-form" class="card">
         <label for="url">YouTube URL або video ID</label>

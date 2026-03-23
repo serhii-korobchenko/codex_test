@@ -1,7 +1,13 @@
+import html
+import json
 import re
 import time
+import urllib.request
 from collections import Counter
+from types import SimpleNamespace
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
+from xml.etree import ElementTree
 
 from flask import Flask, jsonify, render_template, request
 from youtube_transcript_api import (
@@ -23,6 +29,35 @@ STOPWORDS = {
 }
 
 ENGLISH_CODES = ["en", "en-US", "en-GB"]
+
+# Керується оператором: тематика -> перелік кандидатів.
+# Застосунок фільтрує цей список і показує тільки відео, де транскрипція реально доступна.
+TOPIC_VIDEO_CATALOG = {
+    "technology": [
+        {"id": "aircAruvnKk", "title": "How neural networks work"},
+        {"id": "rfscVS0vtbw", "title": "Python full course"},
+        {"id": "8mAITcNt710", "title": "Git and GitHub crash course"},
+    ],
+    "science": [
+        {"id": "5MgBikgcWnY", "title": "The basics of climate science"},
+        {"id": "k6U-i4gXkLM", "title": "CRISPR explained"},
+        {"id": "WXuK6gekU1Y", "title": "How gravity works"},
+    ],
+    "business": [
+        {"id": "x2qRDMHbXaM", "title": "Business model canvas"},
+        {"id": "PHe0bXAIuk0", "title": "Startup funding basics"},
+        {"id": "fU-Pa3R8wT0", "title": "Marketing strategy fundamentals"},
+    ],
+    "education": [
+        {"id": "PkZNo7MFNFg", "title": "Learn JavaScript"},
+        {"id": "Ke90Tje7VS0", "title": "React for beginners"},
+        {"id": "Z1Yd7upQsXY", "title": "Data structures overview"},
+    ],
+}
+
+# topic -> {expires_at, items}
+TRANSCRIPT_AVAILABILITY_CACHE: dict[str, dict] = {}
+CACHE_TTL_SECONDS = 30 * 60
 
 
 def extract_video_id(url: str) -> str | None:
@@ -50,16 +85,6 @@ def tokenize(text: str) -> list[str]:
 
 
 def pick_english_transcript(transcript_list):
-    """
-    Повертає кортеж: (transcript, source_label)
-
-    Пріоритет:
-    1) ручні англійські,
-    2) auto-generated англійські,
-    3) будь-які англійські,
-    4) auto-generated будь-якою мовою + автопереклад в англійську,
-    5) будь-які субтитри + автопереклад в англійську.
-    """
     try:
         return transcript_list.find_manually_created_transcript(ENGLISH_CODES), "manual"
     except NoTranscriptFound:
@@ -72,8 +97,7 @@ def pick_english_transcript(transcript_list):
 
     try:
         transcript = transcript_list.find_transcript(ENGLISH_CODES)
-        source = "auto-generated" if transcript.is_generated else "manual"
-        return transcript, source
+        return transcript, "auto-generated" if transcript.is_generated else "manual"
     except NoTranscriptFound:
         pass
 
@@ -92,57 +116,187 @@ def pick_english_transcript(transcript_list):
 
 def is_rate_limited_error(exc: Exception) -> bool:
     msg = str(exc).lower()
-    return (
-        "too many requests" in msg
-        or "429" in msg
-        or "google.com/sorry" in msg
-        or "request to youtube failed" in msg
-    )
+    return "too many requests" in msg or "429" in msg or "google.com/sorry" in msg
 
 
-def build_transcript_error(exc: Exception) -> tuple[str, int]:
-    if is_rate_limited_error(exc):
-        return (
-            "YouTube тимчасово обмежив запити (429 Too Many Requests). "
-            "Спробуй ще раз через 1-2 хвилини або пізніше.",
-            429,
-        )
+def _url_get(url: str) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=12) as response:
+        return response.read().decode("utf-8", errors="ignore")
 
-    if isinstance(exc, TranscriptsDisabled):
-        return ("Для цього відео субтитри вимкнені власником або недоступні в API.", 404)
 
-    if isinstance(exc, VideoUnavailable):
-        return (
-            "Відео недоступне (private/видалене/обмежене за регіоном або віком), "
-            "тому отримати субтитри неможливо.",
-            404,
-        )
+def _extract_caption_tracks(page_html: str) -> list[dict]:
+    match = re.search(r'"captions"\s*:\s*(\{.*?\})\s*,\s*"videoDetails"', page_html, re.DOTALL)
+    if not match:
+        return []
 
-    if isinstance(exc, NoTranscriptFound):
-        return (
-            "Не знайдено придатні субтитри (включно з auto-generated/перекладом в англійську) для цього відео.",
-            404,
-        )
+    try:
+        captions_obj = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return []
 
-    return ("Не вдалося отримати субтитри. Спробуй інше відео або повтори спробу пізніше.", 500)
+    renderer = captions_obj.get("playerCaptionsTracklistRenderer", {})
+    return renderer.get("captionTracks", [])
+
+
+def _segments_from_caption_xml(xml_text: str) -> list[SimpleNamespace]:
+    root = ElementTree.fromstring(xml_text)
+    segments: list[SimpleNamespace] = []
+
+    for node in root.findall("text"):
+        text = html.unescape("".join(node.itertext())).strip()
+        if text:
+            segments.append(SimpleNamespace(text=text))
+
+    return segments
+
+
+def fetch_via_watch_page(video_id: str):
+    page_html = _url_get(f"https://www.youtube.com/watch?v={video_id}")
+    tracks = _extract_caption_tracks(page_html)
+    if not tracks:
+        raise NoTranscriptFound(video_id=video_id, requested_language_codes=ENGLISH_CODES, transcript_data=[])
+
+    english_track = None
+    translatable_track = None
+
+    for track in tracks:
+        if track.get("languageCode") in ENGLISH_CODES:
+            english_track = track
+            break
+        if track.get("isTranslatable"):
+            translatable_track = track
+
+    selected = english_track or translatable_track
+    if not selected:
+        raise NoTranscriptFound(video_id=video_id, requested_language_codes=ENGLISH_CODES, transcript_data=[])
+
+    caption_url = selected.get("baseUrl")
+    if not caption_url:
+        raise NoTranscriptFound(video_id=video_id, requested_language_codes=ENGLISH_CODES, transcript_data=[])
+
+    source = "auto-generated" if selected.get("kind") == "asr" else "manual"
+    language = selected.get("languageCode", "unknown")
+
+    if not english_track and translatable_track:
+        if "tlang=" not in caption_url:
+            caption_url += "&tlang=en"
+        source = f"{source} (translated to en)"
+        language = "en"
+
+    xml_text = _url_get(caption_url)
+    segments = _segments_from_caption_xml(xml_text)
+    if not segments:
+        raise NoTranscriptFound(video_id=video_id, requested_language_codes=ENGLISH_CODES, transcript_data=[])
+
+    return SimpleNamespace(language_code=language, is_generated=selected.get("kind") == "asr"), source, segments
 
 
 def fetch_transcript_with_retry(video_id: str, retries: int = 1, delay_s: float = 1.5):
+    last_error = None
+
     for attempt in range(retries + 1):
         try:
             transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
             transcript, source_label = pick_english_transcript(transcript_list)
             return transcript, source_label, transcript.fetch()
         except Exception as exc:
+            last_error = exc
             if attempt < retries and is_rate_limited_error(exc):
                 time.sleep(delay_s)
                 continue
-            raise
+            break
+
+    if last_error and isinstance(last_error, (TranscriptsDisabled, NoTranscriptFound, VideoUnavailable)):
+        try:
+            return fetch_via_watch_page(video_id)
+        except Exception:
+            pass
+
+    if last_error:
+        raise last_error
+    raise NoTranscriptFound(video_id=video_id, requested_language_codes=ENGLISH_CODES, transcript_data=[])
+
+
+def build_transcript_error(exc: Exception) -> tuple[str, int]:
+    if is_rate_limited_error(exc):
+        return (
+            "YouTube тимчасово обмежив запити (429 Too Many Requests). Спробуй ще раз через 1-2 хвилини.",
+            429,
+        )
+    if isinstance(exc, TranscriptsDisabled):
+        return (
+            "YouTube API повідомляє, що субтитри вимкнені. Спробуй інше відео або повтори трохи пізніше.",
+            404,
+        )
+    if isinstance(exc, VideoUnavailable):
+        return ("Відео недоступне (private/видалене/обмежене).", 404)
+    if isinstance(exc, NoTranscriptFound):
+        return ("Не вдалося знайти англійські субтитри (включно з auto-generated/translated).", 404)
+    if isinstance(exc, (HTTPError, URLError, ElementTree.ParseError, json.JSONDecodeError)):
+        return ("Не вдалося зчитати субтитри з YouTube. Спробуй пізніше.", 502)
+    return ("Не вдалося отримати субтитри. Спробуй інше відео або повтори спробу пізніше.", 500)
+
+
+def get_available_videos_for_topic(topic: str, force_refresh: bool = False) -> list[dict]:
+    now = time.time()
+    cached = TRANSCRIPT_AVAILABILITY_CACHE.get(topic)
+    if cached and cached["expires_at"] > now and not force_refresh:
+        return cached["items"]
+
+    candidates = TOPIC_VIDEO_CATALOG.get(topic, [])
+    available = []
+
+    for item in candidates:
+        video_id = item["id"]
+        try:
+            transcript, source_label, _ = fetch_transcript_with_retry(video_id, retries=0)
+            available.append(
+                {
+                    "videoId": video_id,
+                    "title": item["title"],
+                    "url": f"https://www.youtube.com/watch?v={video_id}",
+                    "subtitleLanguage": transcript.language_code,
+                    "subtitleSource": source_label,
+                }
+            )
+        except Exception:
+            continue
+
+    TRANSCRIPT_AVAILABILITY_CACHE[topic] = {
+        "expires_at": now + CACHE_TTL_SECONDS,
+        "items": available,
+    }
+    return available
 
 
 @app.get("/")
 def index():
     return render_template("index.html")
+
+
+@app.get("/topics")
+def list_topics():
+    return jsonify(
+        {
+            "topics": [
+                {"id": topic_id, "label": topic_id.capitalize()}
+                for topic_id in TOPIC_VIDEO_CATALOG.keys()
+            ]
+        }
+    )
+
+
+@app.get("/topic-videos")
+def list_videos_by_topic():
+    topic = request.args.get("topic", "").strip().lower()
+    refresh = request.args.get("refresh", "0") == "1"
+
+    if topic not in TOPIC_VIDEO_CATALOG:
+        return jsonify({"error": "Невідома тематика."}), 400
+
+    videos = get_available_videos_for_topic(topic, force_refresh=refresh)
+    return jsonify({"topic": topic, "videos": videos})
 
 
 @app.post("/analyze")
@@ -167,10 +321,7 @@ def analyze_subtitles():
         return jsonify({"error": "Не вдалося знайти слова для аналізу у субтитрах."}), 422
 
     frequencies = Counter(tokens)
-    top_words = [
-        {"word": word, "count": count}
-        for word, count in frequencies.most_common(25)
-    ]
+    top_words = [{"word": word, "count": count} for word, count in frequencies.most_common(25)]
 
     return jsonify(
         {

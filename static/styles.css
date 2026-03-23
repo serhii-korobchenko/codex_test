@@ -10,7 +10,7 @@ body {
 }
 
 .container {
-  max-width: 800px;
+  max-width: 900px;
   margin: 0 auto;
   padding: 2rem 1rem 4rem;
 }
@@ -33,7 +33,8 @@ h1 {
   gap: 0.5rem;
 }
 
-input {
+input,
+select {
   flex: 1;
   border-radius: 8px;
   border: 1px solid #475569;
@@ -55,6 +56,21 @@ button {
 button:disabled {
   opacity: 0.6;
   cursor: progress;
+}
+
+.topic-videos {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.select-video-btn {
+  width: 100%;
+  text-align: left;
+  background: #334155;
+  color: #e2e8f0;
 }
 
 .status {
